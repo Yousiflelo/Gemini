@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Particle Storm</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #050505; /* Deep black/grey background */
+            overflow: hidden; /* Prevent scrollbars */
+            font-family: 'Courier New', monospace;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* Optional: Instructions overlay that fades out */
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 12px;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">Rendering: HTML5 Canvas | AI: GEMINI</div>
+    <canvas id="canvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    let width, height;
+    let particles = [];
+    
+    // Configuration
+    const AI_NAME = "GEMINI";
+    const FONT_SIZE = 120; // Size of the target text
+    const PARTICLE_SIZE = 10; // Font size of the tiny letters
+    const RESOLUTION = 5; // Scan every Nth pixel (lower = more particles)
+    const COLOR = '#00f2ff'; // Cyan/Electric Blue
+    
+    // Animation State Management
+    let state = 'SCATTER'; // SCATTER, ASSEMBLE, HOLD, DISSOLVE
+    let stateTimer = 0;
+    
+    // Timings (in frames, approx 60 frames = 1 sec)
+    const TIMES = {
+        SCATTER: 120,  // 2 seconds of swirling
+        ASSEMBLE: 120, // 2 seconds to form
+        HOLD: 150,     // 2.5 seconds holding the name
+        DISSOLVE: 60   // 1 second to break apart
+    };
+
+    // Resize handling
+    function resize() {
+        width = canvas.width = window.innerWidth;
+        height = canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Helper: Get pixel coordinates for the text "GEMINI"
+    function getTextCoordinates() {
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCanvas.width = width;
+        tempCanvas.height = height;
+
+        tempCtx.font = `900 ${FONT_SIZE}px sans-serif`;
+        tempCtx.textAlign = 'center';
+        tempCtx.textBaseline = 'middle';
+        tempCtx.fillStyle = 'white';
+        tempCtx.fillText(AI_NAME, width / 2, height / 2);
+
+        const imageData = tempCtx.getImageData(0, 0, width, height);
+        const buffer = imageData.data;
+        const coords = [];
+
+        for (let y = 0; y < height; y += RESOLUTION) {
+            for (let x = 0; x < width; x += RESOLUTION) {
+                // If pixel alpha > 128, it's part of the text
+                if (buffer[(y * width + x) * 4 + 3] > 128) {
+                    coords.push({ x, y });
+                }
+            }
+        }
+        return coords;
+    }
+
+    class Particle {
+        constructor(targetX, targetY) {
+            this.targetX = targetX;
+            this.targetY = targetY;
+            
+            // Current position (starts random)
+            this.x = Math.random() * width;
+            this.y = Math.random() * height;
+            
+            // Velocity
+            this.vx = (Math.random() - 0.5) * 2;
+            this.vy = (Math.random() - 0.5) * 2;
+            
+            // The character this particle represents
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<>/';
+            this.char = chars.charAt(Math.floor(Math.random() * chars.length));
+            
+            // Visual variation
+            this.opacity = Math.random() * 0.5 + 0.5;
+            this.size = Math.random() * 4 + 8; // Random size between 8 and 12
+        }
+
+        update(state) {
+            const dx = this.targetX - this.x;
+            const dy = this.targetY - this.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            
+            if (state === 'SCATTER') {
+                // Chaotic swirling motion around the center
+                const centerX = width / 2;
+                const centerY = height / 2;
+                
+                // Angle from center
+                const angle = Math.atan2(this.y - centerY, this.x - centerX);
+                const radius = Math.sqrt(Math.pow(this.x - centerX, 2) + Math.pow(this.y - centerY, 2));
+                
+                // Spiral force
+                this.vx += Math.cos(angle + 1.5) * 0.5; // Tangential force
+                this.vy += Math.sin(angle + 1.5) * 0.5;
+                
+                // Random jitter
+                this.vx += (Math.random() - 0.5) * 0.5;
+                this.vy += (Math.random() - 0.5) * 0.5;
+                
+                // Dampening prevents infinite speed
+                this.vx *= 0.95;
+                this.vy *= 0.95;
+
+            } else if (state === 'ASSEMBLE') {
+                // Move towards target position (Ease out)
+                this.x += (this.targetX - this.x) * 0.05;
+                this.y += (this.targetY - this.y) * 0.05;
+                
+                // Reduce random jitter as we get closer
+                this.vx *= 0.9;
+                this.vy *= 0.9;
+
+            } else if (state === 'HOLD') {
+                // Snap to exact position but vibrate slightly
+                this.x = this.targetX + (Math.random() - 0.5) * 2;
+                this.y = this.targetY + (Math.random() - 0.5) * 2;
+
+            } else if (state === 'DISSOLVE') {
+                // Explode outwards
+                if (Math.abs(this.vx) < 1 && Math.abs(this.vy) < 1) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const force = Math.random() * 10 + 5;
+                    this.vx = Math.cos(angle) * force;
+                    this.vy = Math.sin(angle) * force;
+                }
+            }
+
+            // Apply velocity (except in HOLD and ASSEMBLE logic handles pos directly)
+            if (state !== 'ASSEMBLE' && state !== 'HOLD') {
+                this.x += this.vx;
+                this.y += this.vy;
+            }
+
+            // Screen wrap (only for scatter/dissolve to keep particles in view)
+            if (state === 'SCATTER' || state === 'DISSOLVE') {
+                if (this.x < 0) this.x = width;
+                if (this.x > width) this.x = 0;
+                if (this.y < 0) this.y = height;
+                if (this.y > height) this.y = 0;
+            }
+        }
+
+        draw() {
+            ctx.globalAlpha = this.opacity;
+            ctx.font = `${this.size}px monospace`;
+            
+            // During 'HOLD', make the text bright white/cyan. Otherwise, dimmer.
+            if (state === 'HOLD') {
+                ctx.fillStyle = '#ffffff';
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = COLOR;
+            } else {
+                ctx.fillStyle = COLOR;
+                ctx.shadowBlur = 0;
+            }
+            
+            ctx.fillText(this.char, this.x, this.y);
+        }
+    }
+
+    function init() {
+        particles = [];
+        const targets = getTextCoordinates();
+        
+        // Create a particle for every target point found in the text
+        targets.forEach(target => {
+            particles.push(new Particle(target.x, target.y));
+        });
+
+        // Add some extra "decoys" that don't form part of the word for extra chaos
+        for(let i=0; i<300; i++) {
+            // Decoys target random locations
+            particles.push(new Particle(Math.random()*width, Math.random()*height));
+        }
+    }
+
+    function animate() {
+        // Clear screen with slight fade trail for motion blur effect
+        ctx.fillStyle = 'rgba(5, 5, 5, 0.3)';
+        ctx.fillRect(0, 0, width, height);
+        
+        // State Machine Logic
+        stateTimer++;
+        
+        if (state === 'SCATTER' && stateTimer > TIMES.SCATTER) {
+            state = 'ASSEMBLE';
+            stateTimer = 0;
+        } else if (state === 'ASSEMBLE' && stateTimer > TIMES.ASSEMBLE) {
+            state = 'HOLD';
+            stateTimer = 0;
+        } else if (state === 'HOLD' && stateTimer > TIMES.HOLD) {
+            state = 'DISSOLVE';
+            stateTimer = 0;
+        } else if (state === 'DISSOLVE' && stateTimer > TIMES.DISSOLVE) {
+            state = 'SCATTER';
+            stateTimer = 0;
+        }
+
+        // Render Particles
+        particles.forEach(p => {
+            p.update(state);
+            p.draw();
+        });
+
+        requestAnimationFrame(animate);
+    }
+
+    // Start
+    init();
+    animate();
+
+    // Re-init on resize to keep text centered
+    window.addEventListener('resize', () => {
+        setTimeout(init, 100);
+    });
+
+</script>
+</body>
+</html>
+
